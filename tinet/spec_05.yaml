@@ -1,0 +1,430 @@
+nodes:
+  - name: rt2
+    image: sphalerite1313/frr
+    interfaces:
+      - { name: net0, type: direct, args: rt1#net0 }
+      - { name: net1, type: direct, args: rt3#net0 }
+      - { name: net2, type: direct, args: fw1#net0 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: rt3
+    image: sphalerite1313/frr
+    interfaces:
+      - { name: net0, type: direct, args: rt2#net1 }
+      - { name: net1, type: direct, args: ns1#net0 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: ns1
+    image: sphalerite1313/unbound
+    interfaces:
+      - { name: net0, type: direct, args: rt3#net1 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: fw1
+    image: sphalerite1313/frr-iptables
+    interfaces:
+      - { name: net0, type: direct, args: rt2#net2 }
+      - { name: net1, type: direct, args: sw2#port4 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: sw2
+    image: sphalerite1313/ovs
+    interfaces:
+      - { name: port1, type: direct, args: sv1#net0 }
+      - { name: port2, type: direct, args: sv2#net0 }
+      - { name: port3, type: direct, args: lb1#net0 }
+      - { name: port4, type: direct, args: fw1#net1 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: lb1
+    image: sphalerite1313/haproxy-bind
+    interfaces:
+      - { name: net0, type: direct, args: sw2#port3 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: sv1
+    image: sphalerite1313/nginx
+    interfaces:
+      - { name: net0, type: direct, args: sw2#port1 }
+    dns: 172.16.3.53
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: sv2
+    image: sphalerite1313/nginx
+    interfaces:
+      - { name: net0, type: direct, args: sw2#port2 }
+    dns: 172.16.3.53
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: rt1
+    image: sphalerite1313/frr-iptables-dnsmasq
+    interfaces:
+      - { name: net0, type: direct, args: rt2#net0 }
+      - { name: net1, type: direct, args: sw1#port4 }
+    dns: 10.1.2.53
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: sw1
+    image: sphalerite1313/ovs
+    interfaces:
+      - { name: port1, type: direct, args: cl1#net0 }
+      - { name: port2, type: direct, args: cl2#net0 }
+      - { name: port3, type: direct, args: cl3#net0 }
+      - { name: port4, type: direct, args: rt1#net1 }
+    dns: 127.0.0.1
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: cl1
+    image: sphalerite1313/dhclient
+    interfaces:
+      - { name: net0, type: direct, args: sw1#port1 }
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: cl2
+    image: sphalerite1313/dhclient
+    interfaces:
+      - { name: net0, type: direct, args: sw1#port2 }
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+  - name: cl3
+    image: sphalerite1313/base
+    interfaces:
+      - { name: net0, type: direct, args: sw1#port3 }
+    dns: 192.168.11.254
+    mounts: /mnt/c/tinet:/tmp/tinet
+
+
+
+node_configs:
+  - name: rt2
+    cmds:
+      - cmd: sed -i 's/ospfd=no/ospfd=yes/g' /etc/frr/daemons
+      - cmd: sed -i 's/ospf6d=no/ospf6d=yes/g' /etc/frr/daemons
+      - cmd: /etc/init.d/frr start
+      - cmd: ip addr add 10.1.1.246/30 dev net0
+      - cmd: ip addr add 10.1.1.250/30 dev net1
+      - cmd: ip addr add 10.1.1.254/30 dev net2
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K net1 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K net2 tx off rx off tso off gso off gro off
+      - cmd: >-
+              vtysh -c "conf t"
+              -c "ip route 10.1.3.0 255.255.255.0 10.1.1.253"
+              -c "router ospf"
+              -c "redistribute static"
+              -c "network 10.1.1.246/32 area 0"
+              -c "network 10.1.1.250/32 area 0"
+              -c "network 10.1.1.254/32 area 0"
+              -c "interface net0"
+              -c "ip ospf passive"
+              -c "interface net2"
+              -c "ip ospf passive"
+
+  - name: rt3
+    cmds:
+      - cmd: sed -i 's/ospfd=no/ospfd=yes/g' /etc/frr/daemons
+      - cmd: sed -i 's/ospf6d=no/ospf6d=yes/g' /etc/frr/daemons
+      - cmd: /etc/init.d/frr start
+      - cmd: ip addr add 10.1.1.249/30 dev net0
+      - cmd: ip addr add 10.1.2.254/24 dev net1
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: >-
+              vtysh -c "conf t"
+              -c "router ospf"
+              -c "network 10.1.1.249/32 area 0"
+              -c "network 10.1.2.254/32 area 0"
+              -c "interface net1"
+              -c "ip ospf passive"
+
+  - name: ns1
+    cmds:
+      - cmd: ip addr add 10.1.2.53/24 dev net0
+      - cmd: route add default gw 10.1.2.254
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: bash -c "echo -e 'server":"                                                    ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '  interface":" 0.0.0.0                                       ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '  access-control":" 0.0.0.0/0 allow                          ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '  do-ip6":" no                                               ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '  root-hints":" /etc/unbound/root.hints                      ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e 'remote-control":"                                            ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '  control-enable":" yes                                      ' >> /etc/unbound/unbound.conf"
+      - cmd: bash -c "echo -e '.                       3600000    NS   ns.root-servers.net. ' >> /etc/unbound/root.hints"
+      - cmd: bash -c "echo -e 'ns.root-servers.net.    3600000    A    10.1.3.51            ' >> /etc/unbound/root.hints"
+      - cmd: bash -c "echo -e 'ROOT_TRUST_ANCHOR_UPDATE=false                               ' >> /etc/default/unbound"
+      - cmd: sed -i 's/auto-trust-anchor-file/# auto-trust-anchor-file/g' /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf
+      - cmd: /etc/init.d/unbound start
+      - cmd: dd bs=1KB count=10 if=/dev/zero of=/var/tmp/10KB
+
+  - name: fw1
+    cmds:
+      - cmd: /etc/init.d/frr start
+      - cmd: ip link set dev net1 address 02:42:ac:00:12:54
+      - cmd: ip addr add 10.1.1.253/30 dev net0
+      - cmd: ip addr add 172.16.1.254/24 dev net1
+      - cmd: bash -c "echo -e '172.16.2.1 sv1.example.com ' >> /etc/hosts"
+      - cmd: bash -c "echo -e '172.16.2.2 sv2.example.com ' >> /etc/hosts"
+      - cmd: >-
+              vtysh -c "conf t"
+              -c "ip route 0.0.0.0/0 10.1.1.254"
+              -c "ip route 172.16.2.0/24 172.16.1.253"
+              -c "ip route 172.16.3.0/24 172.16.1.253"
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K net1 tx off rx off tso off gso off gro off
+      - cmd: iptables -t nat -A PREROUTING -d 10.1.3.1 -j DNAT --to 172.16.2.1
+      - cmd: iptables -t nat -A PREROUTING -d 10.1.3.2 -j DNAT --to 172.16.2.2
+      - cmd: iptables -t nat -A PREROUTING -d 10.1.3.53 -j DNAT --to 172.16.3.53
+      - cmd: iptables -t filter -A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+      - cmd: iptables -t filter -A FORWARD -m conntrack --ctstate NEW -p icmp -m icmp --icmp-type echo-request -j ACCEPT
+      - cmd: iptables -t filter -A FORWARD -m conntrack --ctstate NEW -d 172.16.3.53 -p udp -m udp --dport 53 -j ACCEPT
+      - cmd: iptables -t filter -A FORWARD -m conntrack --ctstate NEW -d 172.16.3.53 -p tcp -m tcp --dport 53 -j ACCEPT
+      - cmd: iptables -t filter -P FORWARD DROP
+
+  - name: sw2
+    cmds:
+      - cmd: ovs-vsctl add-br sw2 -- set bridge sw2 datapath_type=netdev
+      - cmd: ovs-vsctl add-port sw2 port1 tag=2
+      - cmd: ovs-vsctl add-port sw2 port2 tag=2
+      - cmd: ovs-vsctl add-port sw2 port3 tag=1 vlan_mode=native-untagged trunks=2
+      - cmd: ovs-vsctl add-port sw2 port4 tag=1
+      - cmd: ethtool -K port1 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port2 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port3 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port4 tx off rx off tso off gso off gro off
+
+  - name: lb1
+    cmds:
+      - cmd: ip link add link net0 name net0.2 type vlan id 2
+      - cmd: ip link set dev net0.2 up
+      - cmd: ip link set dev net0 address 02:42:ac:00:12:53
+      - cmd: ip link set dev net0.2 address 02:42:ac:00:22:54      
+      - cmd: ip addr add 172.16.1.253/24 dev net0
+      - cmd: ip addr add 172.16.2.254/24 dev net0.2
+      - cmd: ip addr add 172.16.3.12/32 dev lo:12
+      - cmd: ip addr add 172.16.3.34/32 dev lo:34
+      - cmd: ip addr add 172.16.3.51/32 dev lo:51
+      - cmd: ip addr add 172.16.3.52/32 dev lo:52
+      - cmd: ip addr add 172.16.3.53/32 dev lo:53
+      - cmd: route add default gw 172.16.1.254
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: /etc/init.d/rsyslog start
+      - cmd: /etc/init.d/rsyslog force-reload
+      - cmd: /etc/init.d/haproxy start
+      - cmd: rm -f /etc/bind/named.conf /etc/bind/named.conf.options
+      - cmd: bash -c "echo -e 'include \"/etc/bind/named.conf.options\";                                            ' >> /etc/bind/named.conf"
+      - cmd: bash -c "echo -e 'include \"/etc/bind/named.conf.root\";                                               ' >> /etc/bind/named.conf"
+      - cmd: bash -c "echo -e 'include \"/etc/bind/named.conf.com\";                                                ' >> /etc/bind/named.conf"
+      - cmd: bash -c "echo -e 'include \"/etc/bind/named.conf.example\";                                            ' >> /etc/bind/named.conf"
+      - cmd: bash -c "echo -e 'options {                                                                            ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e '  directory \"/var/cache/bind\";                                                     ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e '  dnssec-validation no;                                                              ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e '  listen-on-v6 { none; };                                                            ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e '  listen-on port 53 { 127.0.0.1; 172.16.3.51; 172.16.3.52; 172.16.3.53; };           ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e '};                                                                                   ' >> /etc/bind/named.conf.options"
+      - cmd: bash -c "echo -e 'view \"root\" {                                                                      ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e 'match-destinations { 172.16.3.51; };                                                 ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e 'recursion no;                                                                        ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e '  zone \".\" IN {                                                                    ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e '    type master;                                                                     ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e '    file \"/etc/bind/db.root\";                                                      ' >> /etc/bind/named.conf.root"
+      - cmd: bash -c "echo -e '    allow-transfer { none; };                                                        ' >> /etc/bind/named.conf.root"      
+      - cmd: bash -c "echo -e '  };                                                                                 ' >> /etc/bind/named.conf.root"      
+      - cmd: bash -c "echo -e '};                                                                                   ' >> /etc/bind/named.conf.root"      
+      - cmd: bash -c "echo -e 'view \"com\" {                                                                       ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e 'match-destinations { 172.16.3.52; };                                                 ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e 'recursion no;                                                                        ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e '  zone \"com\" IN {                                                                  ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e '    type master;                                                                     ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e '    file \"/etc/bind/db.com\";                                                       ' >> /etc/bind/named.conf.com"
+      - cmd: bash -c "echo -e '    allow-transfer { none; };                                                        ' >> /etc/bind/named.conf.com"      
+      - cmd: bash -c "echo -e '  };                                                                                 ' >> /etc/bind/named.conf.com"      
+      - cmd: bash -c "echo -e '};                                                                                   ' >> /etc/bind/named.conf.com"    
+      - cmd: bash -c "echo -e 'view \"in.example\" {                                                                ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e 'match-clients { 172.16.0.0/12; };                                                    ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e 'recursion no;                                                                        ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '  zone \"example.com\" IN {                                                          ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    type master;                                                                     ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    file \"/etc/bind/db.in.example.com\";                                            ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    allow-transfer { none; };                                                        ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '  };                                                                                 ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '};                                                                                   ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e 'view \"ex.example\" {                                                                ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e 'match-clients { any; };                                                              ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e 'recursion no;                                                                        ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '  zone \"example.com\" IN {                                                          ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    type master;                                                                     ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    file \"/etc/bind/db.ex.example.com\";                                            ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '    allow-transfer { none; };                                                        ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '  };                                                                                 ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '};                                                                                   ' >> /etc/bind/named.conf.example"
+      - cmd: bash -c "echo -e '\$ORIGIN .                                                                             ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e '\$TTL 300                                                                              ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e '@                     IN    SOA    ns.root-servers.net. admin 1 1800 900 604800 86400  ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e '                      IN    NS     ns.root-servers.net.                                ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e '                      IN    A      10.1.3.51                                           ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e 'net.                  IN    NS     ns.root-servers.net.                                ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e 'ns.root-servers.net.  IN    A      10.1.3.51                                           ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e 'com.                  IN    NS     ns.gtld-servers.net.                                ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e 'ns.gtld-servers.net.  IN    A      10.1.3.52                                           ' >> /etc/bind/db.root"
+      - cmd: bash -c "echo -e '\$ORIGIN com.                                                                          ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e '\$TTL 300                                                                              ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e '@                     IN    SOA    ns.gtld-servers.net. admin 1 1800 900 604800 86400  ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e '                      IN    NS     ns.gtld-servers.net.                                ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e '                      IN    A      10.1.3.52                                           ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e 'example.com.          IN    NS     lb1.example.com.                                    ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e 'lb1.example.com.      IN    A      10.1.3.53                                           ' >> /etc/bind/db.com"
+      - cmd: bash -c "echo -e '\$ORIGIN example.com.                                                                  ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e '\$TTL 300                                                                              ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e '@                     IN    SOA    lb1.example.com. admin 1 1800 900 604800 86400      ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e '                      IN    NS     lb1.example.com.                                    ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e '                      IN    A      10.1.3.53                                           ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e 'lb1                   IN    A      10.1.3.53                                           ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e 'sv1                   IN    A      10.1.3.1                                            ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e 'sv2                   IN    A      10.1.3.2                                            ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e 'www                   IN    A      10.1.3.12                                           ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e 'www2                  IN    A      10.1.3.34                                           ' >> /etc/bind/db.ex.example.com"
+      - cmd: bash -c "echo -e '\$ORIGIN example.com.                                                                  ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e '\$TTL 300                                                                              ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e '@                     IN    SOA    lb1.example.com. admin 1 1800 900 604800 86400      ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e '                      IN    NS     lb1.example.com.                                    ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e '                      IN    A      172.16.3.53                                         ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e 'lb1                   IN    A      172.16.3.53                                         ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e 'sv1                   IN    A      172.16.3.1                                          ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e 'sv2                   IN    A      172.16.3.2                                          ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e 'www                   IN    A      172.16.3.12                                         ' >> /etc/bind/db.in.example.com"
+      - cmd: bash -c "echo -e 'www2                  IN    A      172.16.3.34                                         ' >> /etc/bind/db.in.example.com"
+      - cmd: named -c /etc/bind/named.conf -n 1
+
+  - name: sv1
+    cmds:
+      - cmd: ip link set dev net0 address 02:42:ac:00:20:01
+      - cmd: ip addr add 172.16.2.1/24 dev net0
+      - cmd: ip addr add 172.16.2.3/24 dev net0
+      - cmd: route add default gw 172.16.2.254
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: openssl req -subj '/CN=sv1.example.com/C=JP' -new -newkey rsa:2048 -sha256 -days 36500 -nodes -x509 -keyout /etc/ssl/private/server.key -out /etc/ssl/private/server.crt
+      - cmd: openssl dhparam -out /etc/ssl/dhparam.pem 2048
+      - cmd: sed -i "/access_log/i \ \ \ \ \ \ \ \ log_format  custom  '\"\$time_local\" \"\$remote_addr\" \"\$request\" \"\$status\" \"\$http_user_agent\" \"\$http_x_forwarded_for\" \"\$http_x_forwarded_proto\"';" /etc/nginx/nginx.conf
+      - cmd: sed -i 's/access\.log/access\.log custom/g' /etc/nginx/nginx.conf
+      - cmd: rm -f /etc/nginx/sites-available/default
+      - cmd: bash -c "echo -e 'server {                                               ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.1":"80;                              ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.1":"443 ssl http2;                   ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.3":"80;                              ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  server_name sv1.example.com;                         ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_certificate /etc/ssl/private/server.crt;         ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_certificate_key /etc/ssl/private/server.key;     ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_protocols TLSv1.2;                               ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_dhparam /etc/ssl/dhparam.pem;                    ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256":"ECDHE-RSA-AES128-GCM-SHA256":"ECDHE-ECDSA-AES256-GCM-SHA384":"ECDHE-RSA-AES256-GCM-SHA384":"ECDHE-ECDSA-CHACHA20-POLY1305":"ECDHE-RSA-CHACHA20-POLY1305":"DHE-RSA-AES128-GCM-SHA256":"DHE-RSA-AES256-GCM-SHA384":"DHE-RSA-CHACHA20-POLY1305;' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  root /var/www/html;                                  ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  index index.html;                                    ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '}                                                      ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e 'sv1.example.com' > /var/www/html/index.html"
+      - cmd: /etc/init.d/nginx start
+
+  - name: sv2
+    cmds:
+      - cmd: ip link set dev net0 address 02:42:ac:00:20:02
+      - cmd: ip addr add 172.16.2.2/24 dev net0
+      - cmd: ip addr add 172.16.2.4/24 dev net0
+      - cmd: route add default gw 172.16.2.254
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: openssl req -subj '/CN=sv2.example.com/C=JP' -new -newkey rsa:2048 -sha256 -days 36500 -nodes -x509 -keyout /etc/ssl/private/server.key -out /etc/ssl/private/server.crt
+      - cmd: openssl dhparam -out /etc/ssl/dhparam.pem 2048
+      - cmd: sed -i "/access_log/i \ \ \ \ \ \ \ \ log_format  custom  '\"\$time_local\" \"\$remote_addr\" \"\$request\" \"\$status\" \"\$http_user_agent\" \"\$http_x_forwarded_for\" \"\$http_x_forwarded_proto\"';" /etc/nginx/nginx.conf
+      - cmd: sed -i 's/access\.log/access\.log custom/g' /etc/nginx/nginx.conf
+      - cmd: rm -f /etc/nginx/sites-available/default
+      - cmd: bash -c "echo -e 'server {                                               ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.2":"80;                              ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.2":"443 ssl http2;                   ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  listen 172.16.2.4":"80;                              ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  server_name sv2.example.com;                         ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_certificate /etc/ssl/private/server.crt;         ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_certificate_key /etc/ssl/private/server.key;     ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_protocols TLSv1.2;                               ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_dhparam /etc/ssl/dhparam.pem;                    ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256":"ECDHE-RSA-AES128-GCM-SHA256":"ECDHE-ECDSA-AES256-GCM-SHA384":"ECDHE-RSA-AES256-GCM-SHA384":"ECDHE-ECDSA-CHACHA20-POLY1305":"ECDHE-RSA-CHACHA20-POLY1305":"DHE-RSA-AES128-GCM-SHA256":"DHE-RSA-AES256-GCM-SHA384":"DHE-RSA-CHACHA20-POLY1305;' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  root /var/www/html;                                  ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '  index index.html;                                    ' >> /etc/nginx/sites-available/default"
+      - cmd: bash -c "echo -e '}                                                      ' >> /etc/nginx/sites-available/default"      
+      - cmd: bash -c "echo -e 'sv2.example.com' > /var/www/html/index.html"
+      - cmd: /etc/init.d/nginx start
+
+  - name: rt1
+    cmds:
+      - cmd: /etc/init.d/frr start
+      - cmd: ip link set dev net1 address 02:42:ac:01:12:54
+      - cmd: ip addr add 10.1.1.245/30 dev net0
+      - cmd: ip addr add 192.168.11.254/24 dev net1
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K net1 tx off rx off tso off gso off gro off
+      - cmd: bash -c "echo -e 'interface=net1                                           ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-option=3,192.168.11.254                             ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-option=6,192.168.11.254                             ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-range=192.168.11.1,192.168.11.99,1h                 ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-range=192.168.11.101,192.168.11.253,1h              ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-host=02":"42":"ac":"01":"10":"01,192.168.11.1       ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'dhcp-host=02":"42":"ac":"01":"10":"02,192.168.11.2       ' >> /etc/dnsmasq.conf"
+      - cmd: bash -c "echo -e 'cache-size=0                                             ' >> /etc/dnsmasq.conf"
+      - cmd: >-
+              vtysh -c "conf t"
+              -c "ip route 0.0.0.0/0 10.1.1.246"
+      - cmd: iptables -t nat -A POSTROUTING -s 192.168.11.0/24 -j MASQUERADE
+      - cmd: /etc/init.d/dnsmasq start
+
+  - name: sw1
+    cmds:
+      - cmd: ovs-vsctl add-br sw1 -- set bridge sw1 datapath_type=netdev
+      - cmd: ovs-vsctl add-port sw1 port1
+      - cmd: ovs-vsctl add-port sw1 port2
+      - cmd: ovs-vsctl add-port sw1 port3
+      - cmd: ovs-vsctl add-port sw1 port4
+      - cmd: ethtool -K port1 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port2 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port3 tx off rx off tso off gso off gro off
+      - cmd: ethtool -K port4 tx off rx off tso off gso off gro off
+
+  - name: cl1
+    cmds:
+      - cmd: ip link set dev net0 address 02:42:ac:01:10:01
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: sed -i 's/mv -f \$new_resolv_conf \$resolv_conf/cat \$new_resolv_conf > \/etc\/resolv.conf \&\& rm -f \$new_resolv_conf/g' /sbin/dhclient-script
+      - cmd: dhclient net0
+      - cmd: arp -s 192.168.11.2 02:42:ac:01:10:02 dev net0
+
+  - name: cl2
+    cmds:
+      - cmd: ip link set dev net0 address 02:42:ac:01:10:02
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+      - cmd: sed -i 's/mv -f \$new_resolv_conf \$resolv_conf/cat \$new_resolv_conf > \/etc\/resolv.conf \&\& rm -f \$new_resolv_conf/g' /sbin/dhclient-script
+      - cmd: dhclient net0
+      - cmd: arp -s 192.168.11.1 02:42:ac:01:10:01 dev net0
+
+  - name: cl3
+    cmds:
+      - cmd: ip link set dev net0 address 02:42:ac:01:11:00
+      - cmd: ip addr add 192.168.11.100/24 dev net0
+      - cmd: route add default gw 192.168.11.254
+      - cmd: ethtool -K net0 tx off rx off tso off gso off gro off
+
+
+
+test:
+    cmds:
+      - cmd: docker exec cl1 ping -c2 192.168.11.254
+      - cmd: docker exec cl2 ping -c2 192.168.11.254
+      - cmd: docker exec cl3 ping -c2 192.168.11.254
+      - cmd: docker exec rt1 ping -c2 10.1.1.246
+      - cmd: docker exec rt3 ping -c2 10.1.1.250
+      - cmd: docker exec ns1 ping -c2 10.1.2.254
+      - cmd: docker exec fw1 ping -c2 10.1.1.254
+      - cmd: docker exec lb1 ping -c2 172.16.1.254
+      - cmd: docker exec sv1 ping -c2 172.16.2.254
+      - cmd: docker exec sv2 ping -c2 172.16.2.254
